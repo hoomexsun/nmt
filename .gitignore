@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Secrets
+secret.py
+.env
+.env.*
+
+# Data, experiments and temporary files
+data/
+exp*
+
+# Temporary files, old files and copies
+tmp/
+old/
+old*
+*copy.*
+
+# Optional model/download caches
+.cache/
+.huggingface/
+comet_cache/
