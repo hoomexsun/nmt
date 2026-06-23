@@ -1,46 +1,33 @@
 directions:
-  nng_to_en:
-    label: Maring -> English
-    corpus_file: data/nngLatn_engLatn.tsv
-    pairs:
-      mbart50:
-        src_lang: nng_XX
-        tgt_lang: en_XX
-        reverse: false
-      nllb200-dist:
-        src_lang: nng_Latn
-        tgt_lang: eng_Latn
-        reverse: false
-
   en_to_nng:
     label: English -> Maring
-    corpus_file: data/nngLatn_engLatn.tsv
+    corpus_file: data/engLatn_nngLatn.csv
     pairs:
       mbart50:
         src_lang: en_XX
         tgt_lang: nng_XX
-        reverse: true
+        reverse: false
       nllb200-dist:
         src_lang: eng_Latn
         tgt_lang: nng_Latn
-        reverse: true
+        reverse: false
 
-  nmf_to_en:
-    label: Tangkhul -> English
-    corpus_file: data/engLatn_nmfLatn.tsv
+  nng_to_en:
+    label: Maring -> English
+    corpus_file: data/engLatn_nngLatn.csv
     pairs:
       mbart50:
-        src_lang: nmf_XX
+        src_lang: nng_XX
         tgt_lang: en_XX
         reverse: true
       nllb200-dist:
-        src_lang: nmf_Latn
+        src_lang: nng_Latn
         tgt_lang: eng_Latn
         reverse: true
 
   en_to_nmf:
     label: English -> Tangkhul
-    corpus_file: data/engLatn_nmfLatn.tsv
+    corpus_file: data/engLatn_nmfLatn.csv
     pairs:
       mbart50:
         src_lang: en_XX
@@ -50,3 +37,16 @@ directions:
         src_lang: eng_Latn
         tgt_lang: nmf_Latn
         reverse: false
+        
+  nmf_to_en:
+    label: Tangkhul -> English
+    corpus_file: data/engLatn_nmfLatn.csv
+    pairs:
+      mbart50:
+        src_lang: nmf_XX
+        tgt_lang: en_XX
+        reverse: true
+      nllb200-dist:
+        src_lang: nmf_Latn
+        tgt_lang: eng_Latn
+        reverse: true

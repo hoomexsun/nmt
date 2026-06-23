@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import sacrebleu
@@ -7,7 +8,6 @@ from rouge_score import rouge_scorer
 from nltk.translate.meteor_score import meteor_score
 import torch
 from datasets import Dataset, DatasetDict
-from sklearn.model_selection import train_test_split
 from transformers import (
     DataCollatorForSeq2Seq,
     Seq2SeqTrainer,
@@ -24,7 +24,6 @@ def preprocess_function_factory(
     src_lang, tgt_lang, tokenizer, max_source_length=128, max_target_length=128
 ):
     def preprocess_function(examples):
-        # For mBART/NLLB, src_lang/tgt_lang handled via loader.
         model_inputs = tokenizer(
             examples["source"],
             max_length=max_source_length,
@@ -103,11 +102,9 @@ def train_direction(cfg: dict):
     folder_prefix = cfg["folder_prefix"]
     src_lang = cfg["src_lang"]
     tgt_lang = cfg["tgt_lang"]
-    tsv_file = cfg["tsv_file"]
     reverse = cfg.get("reverse", False)
     train_cfg = cfg["training"]
 
-    test_size = float(train_cfg["test_size"])
     seed = int(train_cfg["seed"])
     max_src_len = int(train_cfg["max_src_len"])
     max_tgt_len = int(train_cfg["max_tgt_len"])
@@ -133,17 +130,34 @@ def train_direction(cfg: dict):
     print(f"Output dir: {output_dir}")
     print(f"{'='*60}\n")
 
-    df = load_and_prepare_df(tsv_file, reverse=reverse)
+    # --------------------------------------------------------
+    # Load precomputed train/validation splits (CSV)
+    # --------------------------------------------------------
+    corpus_file = cfg["corpus_file"]  # from directions.yaml
+    base_path = Path(corpus_file)
+    split_dir = base_path.with_suffix("")  # e.g. data/engLatn_nngLatn
 
-    train_df, val_df = train_test_split(
-        df,
-        test_size=test_size,
-        random_state=seed,
-        shuffle=True,
-    )
+    train_path = split_dir / "train.csv"
+    val_path = split_dir / "validation.csv"
+    test_path = split_dir / "test.csv"  # reserved for final evaluation
 
-    train_df.to_csv(os.path.join(output_dir, "train.tsv"), sep="\t", index=False)
-    val_df.to_csv(os.path.join(output_dir, "validation.tsv"), sep="\t", index=False)
+    if not train_path.exists() or not val_path.exists():
+        raise FileNotFoundError(
+            f"Pre-split files not found.\n"
+            f"Expected train: {train_path}\n"
+            f"Expected validation: {val_path}\n"
+            f"Run 'python -m src.nmt_toolkit.split_corpus' first."
+        )
+
+    # Load pre-split train/validation; apply reverse at direction level
+    train_df = load_and_prepare_df(str(train_path), reverse=reverse)
+    val_df = load_and_prepare_df(str(val_path), reverse=reverse)
+
+    # Keep copies under exp_dir (for translation script)
+    train_out = os.path.join(output_dir, "train.csv")
+    val_out = os.path.join(output_dir, "validation.csv")
+    train_df.to_csv(train_out, sep=",", index=False)
+    val_df.to_csv(val_out, sep=",", index=False)
 
     hf_dataset = DatasetDict(
         {
@@ -184,9 +198,9 @@ def train_direction(cfg: dict):
         weight_decay=weight_decay,
         num_train_epochs=num_epochs,
         predict_with_generate=True,
-        save_total_limit=2,
+        save_total_limit=3,
         load_best_model_at_end=True,
-        metric_for_best_model="exact_match",
+        metric_for_best_model="chrf",
         greater_is_better=True,
         fp16=torch.cuda.is_available(),
         report_to=report_to,
@@ -203,7 +217,26 @@ def train_direction(cfg: dict):
         compute_metrics=lambda eval_pred: compute_metrics(eval_pred, tokenizer),
     )
 
-    trainer.train()
+    # Resume from last checkpoint only if it exists
+    last_checkpoint = None
+    if os.path.isdir(output_dir):
+        # look for subdirs named 'checkpoint-XXXX'
+        checkpoints = [
+            os.path.join(output_dir, d)
+            for d in os.listdir(output_dir)
+            if d.startswith("checkpoint-")
+            and os.path.isdir(os.path.join(output_dir, d))
+        ]
+        if checkpoints:
+            last_checkpoint = max(checkpoints, key=os.path.getmtime)
+
+    if last_checkpoint is not None:
+        print(f"[INFO] Resuming training from checkpoint: {last_checkpoint}")
+        trainer.train(resume_from_checkpoint=last_checkpoint)
+    else:
+        print("[INFO] No checkpoint found, starting training from scratch.")
+        trainer.train()
+
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
 

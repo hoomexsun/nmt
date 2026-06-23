@@ -54,41 +54,13 @@ def download_and_save_nllb():
     print(f"[OK] Saved NLLB-200 distilled 600M to {local_dir}")
 
 
-def download_and_save_mt5_small():
-    local_dir = MODELS_DIR / "mt5-small"
-    prepare_dir(local_dir)
-    print(f"[INFO] Downloading mT5-small to {local_dir} ...")
-
-    tok = AutoTokenizer.from_pretrained("google/mt5-small")
-    mdl = AutoModelForSeq2SeqLM.from_pretrained("google/mt5-small")
-
-    tok.save_pretrained(local_dir)
-    mdl.save_pretrained(local_dir)
-    print(f"[OK] Saved mT5-small to {local_dir}")
-
-
-def download_and_save_byt5_small():
-    local_dir = MODELS_DIR / "byt5-small"
-    prepare_dir(local_dir)
-    print(f"[INFO] Downloading ByT5-small to {local_dir} ...")
-
-    tok = AutoTokenizer.from_pretrained("google/byt5-small")
-    mdl = AutoModelForSeq2SeqLM.from_pretrained("google/byt5-small")
-
-    tok.save_pretrained(local_dir)
-    mdl.save_pretrained(local_dir)
-    print(f"[OK] Saved ByT5-small to {local_dir}")
-
-
 # -------------------------------------------------------- MAIN
 
 
 def main():
     print("[INFO] Preparing local models directory:", MODELS_DIR)
-    # download_and_save_mbart()
-    # download_and_save_nllb()
-    download_and_save_mt5_small()
-    download_and_save_byt5_small()
+    download_and_save_mbart()
+    download_and_save_nllb()
     print("[DONE] All base models downloaded and saved locally.")
 
 

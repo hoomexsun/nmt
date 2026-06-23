@@ -18,7 +18,7 @@ def model_exists(exp_dir: str) -> bool:
 
 
 def predictions_exist(exp_dir: str) -> bool:
-    path = os.path.join(exp_dir, "validation.predictions.tsv")
+    path = os.path.join(exp_dir, "validation.predictions.csv")
     return os.path.exists(path) and os.path.getsize(path) > 0
 
 
@@ -41,13 +41,12 @@ def prepare_default_exp_dir(
 # -------------------------------------------------------- DATA LOADING
 
 
-def load_and_prepare_df(tsv_file: str, reverse: bool = False):
+def load_and_prepare_df(csv_file: str, reverse: bool = False):
     df = pd.read_csv(
-        tsv_file,
-        sep="\t",
+        csv_file,
+        sep=",",
         header=None,
         names=["source", "target"],
-        quoting=3,
     )
     df = df[["source", "target"]].dropna()
     df["source"] = df["source"].astype(str).str.strip()
@@ -58,7 +57,7 @@ def load_and_prepare_df(tsv_file: str, reverse: bool = False):
         df = df.rename(columns={"source": "target", "target": "source"})
 
     print(
-        f"Loaded {len(df)} samples from {tsv_file}" + (" (reversed)" if reverse else "")
+        f"Loaded {len(df)} samples from {csv_file}" + (" (reversed)" if reverse else "")
     )
     print(f"Sample source: {df['source'].iloc[0][:100]}")
     print(f"Sample target: {df['target'].iloc[0][:100]}")
@@ -66,11 +65,11 @@ def load_and_prepare_df(tsv_file: str, reverse: bool = False):
 
 
 def load_validation_df(exp_dir: str):
-    val_tsv = os.path.join(exp_dir, "validation.tsv")
-    if not os.path.exists(val_tsv):
-        raise FileNotFoundError(f"Validation file not found: {val_tsv}")
+    val_csv = os.path.join(exp_dir, "validation.csv")
+    if not os.path.exists(val_csv):
+        raise FileNotFoundError(f"Validation file not found: {val_csv}")
 
-    val_df = pd.read_csv(val_tsv, sep="\t")
+    val_df = pd.read_csv(val_csv, sep="\t")
     val_df = val_df[["source", "target"]].dropna()
     val_df["source"] = val_df["source"].astype(str).str.strip()
     val_df["target"] = val_df["target"].astype(str).str.strip()

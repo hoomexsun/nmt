@@ -11,6 +11,7 @@ from .utils import (
     predictions_exist,
     prepare_default_exp_dir,
 )
+from .split_corpus import main as split_corpus_main
 
 # -------------------------------------------------------- PIPELINE
 
@@ -66,6 +67,11 @@ def parse_args():
     parser.add_argument("--comet_model_tag", default=None)
     parser.add_argument("--allow-online", action="store_true")
     parser.add_argument("--gui", action="store_true")
+    parser.add_argument(
+        "--pre-split",
+        action="store_true",
+        help="Run data splitting (train/val/test) before training",
+    )
     return parser.parse_args()
 
 
@@ -78,6 +84,11 @@ def main():
     if args.gui:
         launch_gui()
         return
+
+    # Optional: run splitting once before any tasks
+    if args.pre_split:
+        print("[INFO] Running pre-split of corpora (train/val/test)...")
+        split_corpus_main()
 
     tasks = build_job_configs()
 

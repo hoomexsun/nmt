@@ -16,4 +16,3 @@ jobs:
     model_family: nllb200-dist
   - direction: en_to_nmf
     model_family: nllb200-dist
-

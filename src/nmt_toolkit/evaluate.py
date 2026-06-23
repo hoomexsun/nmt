@@ -53,27 +53,28 @@ def compute_comet(model, srcs, preds, refs):
     return None
 
 
-# -------------------------------------------------------- EVALUATION
+# -------------------------------------------------------- EVALUATION CORE
 
 
-def evaluate_predictions(
-    exp_dir: str, comet_model_tag: str = None, strict: bool = False
+def evaluate_predictions_for_file(
+    pred_csv_path: str,
+    scores_prefix: str,
+    comet_model_tag: str = None,
+    strict: bool = False,
 ):
-    translations_dir = os.path.join(exp_dir, "translations")
-    scores_dir = os.path.join(exp_dir, "scores")
+    if not os.path.exists(pred_csv_path):
+        raise FileNotFoundError(f"Prediction CSV not found: {pred_csv_path}")
+
+    scores_dir = os.path.dirname(scores_prefix)
     os.makedirs(scores_dir, exist_ok=True)
 
-    pred_tsv_path = os.path.join(translations_dir, "validation.predictions.tsv")
-    txt_path = os.path.join(scores_dir, "evaluation_results.txt")
-    csv_path = os.path.join(scores_dir, "evaluation_results.csv")
-    json_path = os.path.join(scores_dir, "evaluation_results.json")
-
-    if not os.path.exists(pred_tsv_path):
-        raise FileNotFoundError(f"Prediction TSV not found: {pred_tsv_path}")
+    txt_path = scores_prefix + ".txt"
+    csv_path = scores_prefix + ".csv"
+    json_path = scores_prefix + ".json"
 
     srcs, preds, refs = [], [], []
-    with open(pred_tsv_path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+    with open(pred_csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter=",")
         for row in reader:
             srcs.append(row.get("src", ""))
             preds.append(row.get("pred", ""))
@@ -100,8 +101,7 @@ def evaluate_predictions(
                 print(f"[WARNING] COMET failed: {e}")
 
     metrics = {
-        "exp_dir": exp_dir,
-        "prediction_tsv": pred_tsv_path,
+        "prediction_csv": pred_csv_path,
         "n_examples": n,
         "bleu": round(float(bleu.score), 4),
         "chrf": round(float(chrf.score), 4),
@@ -130,3 +130,52 @@ def evaluate_predictions(
     print(f"Saved: {csv_path}")
     print(f"Saved: {json_path}")
     return metrics
+
+
+# -------------------------------------------------------- HIGH-LEVEL ENTRY
+
+
+def evaluate_predictions(
+    exp_dir: str, comet_model_tag: str = None, strict: bool = False
+):
+    translations_dir = os.path.join(exp_dir, "translations")
+    scores_dir = os.path.join(exp_dir, "scores")
+    os.makedirs(scores_dir, exist_ok=True)
+
+    # Validation
+    val_pred_csv = os.path.join(translations_dir, "validation.predictions.csv")
+    val_scores_prefix = os.path.join(scores_dir, "validation_results")
+
+    # Test
+    test_pred_csv = os.path.join(translations_dir, "test.predictions.csv")
+    test_scores_prefix = os.path.join(scores_dir, "test_results")
+
+    results = {}
+
+    if os.path.exists(val_pred_csv):
+        print(f"[INFO] Evaluating validation predictions: {val_pred_csv}")
+        results["validation"] = evaluate_predictions_for_file(
+            val_pred_csv,
+            val_scores_prefix,
+            comet_model_tag=comet_model_tag,
+            strict=strict,
+        )
+        results["validation"]["exp_dir"] = exp_dir
+
+    if os.path.exists(test_pred_csv):
+        print(f"[INFO] Evaluating test predictions: {test_pred_csv}")
+        results["test"] = evaluate_predictions_for_file(
+            test_pred_csv,
+            test_scores_prefix,
+            comet_model_tag=comet_model_tag,
+            strict=strict,
+        )
+        results["test"]["exp_dir"] = exp_dir
+
+    if not results:
+        raise FileNotFoundError(
+            f"No prediction files found in {translations_dir} "
+            f"(expected validation.predictions.csv and/or test.predictions.csv)"
+        )
+
+    return results

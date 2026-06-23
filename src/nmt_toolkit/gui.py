@@ -64,7 +64,7 @@ def load_corpus_samples(corpus_file: str, reverse: bool, limit: int = 12):
     items = []
     if os.path.exists(corpus_file):
         with open(corpus_file, "r", encoding="utf-8") as f:
-            reader = csv.reader(f, delimiter="\t")
+            reader = csv.reader(f, delimiter=",")
             first_row = next(reader, None)
             if first_row and len(first_row) >= 2:
                 try:

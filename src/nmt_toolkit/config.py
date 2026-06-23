@@ -63,7 +63,8 @@ def build_job_configs():
             "src_lang": pair_info["src_lang"],
             "tgt_lang": pair_info["tgt_lang"],
             "reverse": pair_info.get("reverse", False),
-            "tsv_file": resolve_path(direction_info["corpus_file"]),
+            # use corpus_file from directions.yaml, resolved to absolute path
+            "corpus_file": resolve_path(direction_info["corpus_file"]),
             "base_exp_dir": resolve_path(runtime["base_exp_dir"]),
             "allow_online": runtime.get("allow_online", False),
             "transformers_offline": runtime.get("transformers_offline", False),
