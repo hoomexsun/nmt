@@ -45,7 +45,7 @@ def load_and_prepare_df(csv_file: str, reverse: bool = False):
     df = pd.read_csv(
         csv_file,
         sep=",",
-        header=None,
+        header=0,
         names=["source", "target"],
     )
     df = df[["source", "target"]].dropna()
@@ -69,7 +69,7 @@ def load_validation_df(exp_dir: str):
     if not os.path.exists(val_csv):
         raise FileNotFoundError(f"Validation file not found: {val_csv}")
 
-    val_df = pd.read_csv(val_csv, sep="\t")
+    val_df = pd.read_csv(val_csv, sep=",")
     val_df = val_df[["source", "target"]].dropna()
     val_df["source"] = val_df["source"].astype(str).str.strip()
     val_df["target"] = val_df["target"].astype(str).str.strip()
