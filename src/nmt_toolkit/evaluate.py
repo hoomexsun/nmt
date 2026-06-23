@@ -1,5 +1,6 @@
-import os
 import csv
+import json
+import os
 
 import sacrebleu
 import torch
@@ -11,7 +12,9 @@ except Exception:
     load_from_checkpoint = None
 
 
-# ---------------------------------------------------- EVALUATION UTILS
+# -------------------------------------------------------- EVALUATION UTILS
+
+
 def load_comet_model(comet_model_tag):
     if download_model is None or load_from_checkpoint is None:
         print("[WARNING] COMET is not installed. Skipping COMET.")
@@ -51,14 +54,19 @@ def compute_comet(model, srcs, preds, refs):
 
 
 # -------------------------------------------------------- EVALUATION
+
+
 def evaluate_predictions(
-    exp_dir: str,
-    comet_model_tag: str = None,
-    strict: bool = False,
+    exp_dir: str, comet_model_tag: str = None, strict: bool = False
 ):
-    pred_tsv_path = os.path.join(exp_dir, "validation.predictions.tsv")
-    out_path = os.path.join(exp_dir, "evaluation_results.txt")
-    csv_path = os.path.join(exp_dir, "evaluation_results.csv")
+    translations_dir = os.path.join(exp_dir, "translations")
+    scores_dir = os.path.join(exp_dir, "scores")
+    os.makedirs(scores_dir, exist_ok=True)
+
+    pred_tsv_path = os.path.join(translations_dir, "validation.predictions.tsv")
+    txt_path = os.path.join(scores_dir, "evaluation_results.txt")
+    csv_path = os.path.join(scores_dir, "evaluation_results.csv")
+    json_path = os.path.join(scores_dir, "evaluation_results.json")
 
     if not os.path.exists(pred_tsv_path):
         raise FileNotFoundError(f"Prediction TSV not found: {pred_tsv_path}")
@@ -103,15 +111,22 @@ def evaluate_predictions(
         "signature": bleu.format(),
     }
 
-    with open(out_path, "w", encoding="utf-8") as f:
+    # Human-readable text summary
+    with open(txt_path, "w", encoding="utf-8") as f:
         for k, v in metrics.items():
             f.write(f"{k}: {v}\n")
 
+    # CSV metrics
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
         writer.writeheader()
         writer.writerow(metrics)
 
-    print(f"Saved: {out_path}")
+    # JSON metrics (nice for tools / tracking)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+
+    print(f"Saved: {txt_path}")
     print(f"Saved: {csv_path}")
+    print(f"Saved: {json_path}")
     return metrics

@@ -1,50 +1,36 @@
+import json
 import os
 
-
 import numpy as np
+import sacrebleu
+from rouge_score import rouge_scorer
+from nltk.translate.meteor_score import meteor_score
 import torch
 from datasets import Dataset, DatasetDict
 from sklearn.model_selection import train_test_split
 from transformers import (
     DataCollatorForSeq2Seq,
-    Seq2SeqTrainingArguments,
     Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
 )
 
 from .loader import load_for_training
-from .utils import model_exists, prepare_default_exp_dir, load_and_prepare_df
+from .utils import load_and_prepare_df, model_exists, prepare_default_exp_dir
 
-# Requires 16GB VRAM for this batch size
-train_defaults = {
-    "test_size": 0.1,
-    "seed": 42,
-    "max_src_len": 128,
-    "max_tgt_len": 128,
-    "batch_size": 8,
-    "num_epochs": 30,
-    "lr": 2e-5,
-    "weight_decay": 0.01,
-    "report_to": "tensorboard",
-}
+# -------------------------------------------------------- TRAINING UTILS
 
 
-# ---------------------------------------------------- TRAINING UTILS
 def preprocess_function_factory(
-    src_lang: str,
-    tgt_lang: str,
-    tokenizer,
-    max_source_length=128,
-    max_target_length=128,
+    src_lang, tgt_lang, tokenizer, max_source_length=128, max_target_length=128
 ):
     def preprocess_function(examples):
-        tokenizer.src_lang = src_lang
+        # For mBART/NLLB, src_lang/tgt_lang handled via loader.
         model_inputs = tokenizer(
             examples["source"],
             max_length=max_source_length,
             truncation=True,
         )
 
-        tokenizer.tgt_lang = tgt_lang
         labels = tokenizer(
             text_target=examples["target"],
             max_length=max_target_length,
@@ -70,19 +56,73 @@ def compute_metrics(eval_pred, tokenizer):
     decoded_labels = [x.strip() for x in decoded_labels]
 
     exact_match = np.mean([p == l for p, l in zip(decoded_preds, decoded_labels)])
-    return {"exact_match": float(exact_match)}
+
+    bleu = sacrebleu.corpus_bleu(decoded_preds, [decoded_labels])
+    chrf = sacrebleu.corpus_chrf(decoded_preds, [decoded_labels], word_order=0)
+    chrfpp = sacrebleu.corpus_chrf(decoded_preds, [decoded_labels], word_order=2)
+    ter = sacrebleu.corpus_ter(decoded_preds, [decoded_labels])
+
+    rouge = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+    rouge_l_f1_scores = [
+        rouge.score(ref, pred)["rougeL"].fmeasure
+        for pred, ref in zip(decoded_preds, decoded_labels)
+    ]
+    rouge_l_f1 = float(np.mean(rouge_l_f1_scores)) if rouge_l_f1_scores else 0.0
+
+    meteor_scores = [
+        meteor_score([ref.split()], pred.split())
+        for pred, ref in zip(decoded_preds, decoded_labels)
+    ]
+    meteor = float(np.mean(meteor_scores)) if meteor_scores else 0.0
+
+    return {
+        "exact_match": float(exact_match),
+        "bleu": float(bleu.score),
+        "chrf": float(chrf.score),
+        "chrfpp": float(chrfpp.score),
+        "ter": float(ter.score),
+        "rougeL": rouge_l_f1,
+        "meteor": meteor,
+    }
+
+
+def _save_train_config(output_dir: str, cfg: dict):
+    path = os.path.join(output_dir, "train_config.json")
+
+    safe_cfg = dict(cfg)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(safe_cfg, f, indent=2, ensure_ascii=False)
+
+    print(f"Saved train config to: {path}")
 
 
 # -------------------------------------------------------- TRAINING
+
+
 def train_direction(cfg: dict):
     folder_prefix = cfg["folder_prefix"]
     src_lang = cfg["src_lang"]
     tgt_lang = cfg["tgt_lang"]
     tsv_file = cfg["tsv_file"]
     reverse = cfg.get("reverse", False)
+    train_cfg = cfg["training"]
 
-    output_dir = prepare_default_exp_dir(folder_prefix, src_lang, tgt_lang)
+    test_size = float(train_cfg["test_size"])
+    seed = int(train_cfg["seed"])
+    max_src_len = int(train_cfg["max_src_len"])
+    max_tgt_len = int(train_cfg["max_tgt_len"])
+    batch_size = int(train_cfg["batch_size"])
+    num_epochs = int(train_cfg["num_epochs"])
+    lr = float(train_cfg["lr"])
+    weight_decay = float(train_cfg["weight_decay"])
+    report_to = train_cfg["report_to"]
+
+    output_dir = prepare_default_exp_dir(
+        cfg["base_exp_dir"], folder_prefix, src_lang, tgt_lang
+    )
     os.makedirs(output_dir, exist_ok=True)
+
+    _save_train_config(output_dir, cfg)
 
     if model_exists(output_dir):
         print(f"[SKIP] Model already exists: {output_dir}")
@@ -97,8 +137,8 @@ def train_direction(cfg: dict):
 
     train_df, val_df = train_test_split(
         df,
-        test_size=train_defaults["test_size"],
-        random_state=train_defaults["seed"],
+        test_size=test_size,
+        random_state=seed,
         shuffle=True,
     )
 
@@ -122,8 +162,8 @@ def train_direction(cfg: dict):
         src_lang,
         tgt_lang,
         tokenizer,
-        max_source_length=train_defaults["max_src_len"],
-        max_target_length=train_defaults["max_tgt_len"],
+        max_source_length=max_src_len,
+        max_target_length=max_tgt_len,
     )
 
     tokenized = hf_dataset.map(
@@ -138,19 +178,19 @@ def train_direction(cfg: dict):
         output_dir=output_dir,
         eval_strategy="epoch",
         save_strategy="epoch",
-        learning_rate=train_defaults["lr"],
-        per_device_train_batch_size=train_defaults["batch_size"],
-        per_device_eval_batch_size=train_defaults["batch_size"],
-        weight_decay=train_defaults["weight_decay"],
-        num_train_epochs=train_defaults["num_epochs"],
+        learning_rate=lr,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+        weight_decay=weight_decay,
+        num_train_epochs=num_epochs,
         predict_with_generate=True,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model="exact_match",
         greater_is_better=True,
         fp16=torch.cuda.is_available(),
-        report_to=train_defaults["report_to"],
-        seed=train_defaults["seed"],
+        report_to=report_to,
+        seed=seed,
     )
 
     trainer = Seq2SeqTrainer(

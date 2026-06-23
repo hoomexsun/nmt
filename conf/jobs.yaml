@@ -1,0 +1,19 @@
+jobs:
+  - direction: nng_to_en
+    model_family: mbart50
+  - direction: en_to_nng
+    model_family: mbart50
+  - direction: nmf_to_en
+    model_family: mbart50
+  - direction: en_to_nmf
+    model_family: mbart50
+
+  - direction: nng_to_en
+    model_family: nllb200-dist
+  - direction: en_to_nng
+    model_family: nllb200-dist
+  - direction: nmf_to_en
+    model_family: nllb200-dist
+  - direction: en_to_nmf
+    model_family: nllb200-dist
+

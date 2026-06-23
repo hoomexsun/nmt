@@ -1,0 +1,20 @@
+models:
+  mbart50:
+    repo_id: facebook/mbart-large-50-many-to-many-mmt
+    local_path: models/mbart-large-50-many-to-many-mmt
+    folder_prefix: mbart-large-50-many-to-many-mmt
+    model_type: mbart
+    training:
+      batch_size: 8
+      max_src_len: 128
+      max_tgt_len: 128
+
+  nllb200-dist:
+    repo_id: facebook/nllb-200-distilled-600M
+    local_path: models/nllb-200-distilled-600M
+    folder_prefix: nllb-200-distilled-600M
+    model_type: nllb
+    training:
+      batch_size: 4
+      max_src_len: 128
+      max_tgt_len: 128

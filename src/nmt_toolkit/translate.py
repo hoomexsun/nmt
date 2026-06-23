@@ -1,21 +1,15 @@
-import os
 import csv
-
-import torch
+import os
 import pandas as pd
+import torch
 from tqdm.auto import tqdm
 
 from .loader import load_for_inference
-from .utils import predictions_exist, prepare_default_exp_dir, load_validation_df
+from .utils import load_validation_df, prepare_default_exp_dir
 
-infer_defaults = {
-    "max_length": 128,
-    "batch_size": 16,
-    "num_beams": 4,
-}
+# -------------------------------------------------------- TRANSLATION UTILS
 
 
-# ---------------------------------------------------- TRANSLATION UTILS
 def get_resume_count(pred_file: str) -> int:
     if not os.path.exists(pred_file):
         return 0
@@ -27,7 +21,6 @@ def get_resume_count(pred_file: str) -> int:
         return 0
 
 
-# -------------------------------------------------------- TRANSLATION
 def append_prediction_rows(pred_file: str, rows: list, write_header: bool):
     mode = "w" if write_header else "a"
     with open(pred_file, mode, encoding="utf-8", newline="") as f:
@@ -37,23 +30,49 @@ def append_prediction_rows(pred_file: str, rows: list, write_header: bool):
         writer.writerows(rows)
 
 
+def save_flat_files(translations_dir: str, srcs, preds, refs):
+    src_path = os.path.join(translations_dir, "val.src.txt")
+    ref_path = os.path.join(translations_dir, "val.ref.txt")
+    pred_path = os.path.join(translations_dir, "val.pred.txt")
+
+    with open(src_path, "w", encoding="utf-8") as f_src, open(
+        ref_path, "w", encoding="utf-8"
+    ) as f_ref, open(pred_path, "w", encoding="utf-8") as f_pred:
+        for s, r, p in zip(srcs, refs, preds):
+            f_src.write(str(s).strip() + "\n")
+            f_ref.write(str(r).strip() + "\n")
+            f_pred.write(str(p).strip() + "\n")
+
+    print(f"Saved: {src_path}")
+    print(f"Saved: {ref_path}")
+    print(f"Saved: {pred_path}")
+
+
+# -------------------------------------------------------- TRANSLATION
+
+
 def translate_direction(cfg: dict):
     folder_prefix = cfg["folder_prefix"]
     src_lang = cfg["src_lang"]
     tgt_lang = cfg["tgt_lang"]
+    infer_cfg = cfg["inference"]
 
-    exp_dir = prepare_default_exp_dir(folder_prefix, src_lang, tgt_lang)
-
+    exp_dir = prepare_default_exp_dir(
+        cfg["base_exp_dir"], folder_prefix, src_lang, tgt_lang
+    )
     print(f"exp_dir={exp_dir}")
 
-    if predictions_exist(exp_dir):
-        print(f"[SKIP] Predictions already exist: {exp_dir}")
+    translations_dir = os.path.join(exp_dir, "translations")
+    os.makedirs(translations_dir, exist_ok=True)
+
+    pred_file = os.path.join(translations_dir, "validation.predictions.tsv")
+    if os.path.exists(pred_file) and os.path.getsize(pred_file) > 0:
+        print(f"[SKIP] Predictions already exist: {pred_file}")
         return exp_dir
 
     model, tokenizer = load_for_inference(exp_dir, cfg)
     val_df = load_validation_df(exp_dir)
 
-    pred_file = os.path.join(exp_dir, "validation.predictions.tsv")
     sources = val_df["source"].tolist()
     references = val_df["target"].tolist()
     total = len(sources)
@@ -64,29 +83,23 @@ def translate_direction(cfg: dict):
         if os.path.exists(pred_file):
             os.remove(pred_file)
 
-    if start_idx > 0:
-        existing_df = pd.read_csv(pred_file, sep="\t")
-        all_sources = existing_df["src"].tolist()
-        all_predictions = existing_df["pred"].tolist()
-        all_references = existing_df["ref"].tolist()
-    else:
-        all_sources, all_predictions, all_references = [], [], []
+    all_sources, all_predictions, all_references = [], [], []
 
     device = next(model.parameters()).device
     pbar = tqdm(
-        range(start_idx, total, infer_defaults["batch_size"]),
+        range(start_idx, total, infer_cfg["batch_size"]),
         desc="Translating",
         unit="batch",
     )
     write_header = start_idx == 0
 
     for i in pbar:
-        batch_sources = sources[i : i + infer_defaults["batch_size"]]
-        batch_refs = references[i : i + infer_defaults["batch_size"]]
+        batch_sources = sources[i : i + infer_cfg["batch_size"]]
+        batch_refs = references[i : i + infer_cfg["batch_size"]]
 
         inputs = tokenizer(
             batch_sources,
-            max_length=infer_defaults["max_length"],
+            max_length=infer_cfg["max_length"],
             truncation=True,
             return_tensors="pt",
             padding=True,
@@ -96,8 +109,8 @@ def translate_direction(cfg: dict):
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_length=infer_defaults["max_length"],
-                num_beams=infer_defaults["num_beams"],
+                max_length=infer_cfg["max_length"],
+                num_beams=infer_cfg["num_beams"],
                 early_stopping=True,
                 forced_bos_token_id=model.config.forced_bos_token_id,
             )
@@ -112,5 +125,7 @@ def translate_direction(cfg: dict):
         all_sources.extend(batch_sources)
         all_predictions.extend(batch_preds)
         all_references.extend(batch_refs)
+
+    save_flat_files(translations_dir, all_sources, all_predictions, all_references)
 
     return exp_dir

@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
-import os
 import csv
+import os
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 import torch
 from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
     MBart50TokenizerFast,
     MBartForConditionalGeneration,
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
 )
 
-BASE_EXP_DIR = "exp"
-MAX_LENGTH = 128
-NUM_BEAMS = 4
-
-MODEL_CONFIGS = {
-    "mBART-50": {
-        "base_name": "facebook/mbart-large-50-many-to-many-mmt",
-        "folder_name": "mbart-large-50-many-to-many-mmt",
-        "type": "mbart",
-    },
-    "NLLB-200": {
-        "base_name": "facebook/nllb-200-distilled-600M",
-        "folder_name": "nllb-200-distilled-600M",
-        "type": "nllb",
-    },
-}
+from .config import build_direction_registry, load_all_configs
+from .utils import prepare_default_exp_dir
 
 LANG_NAMES = {
     "nng_XX": "Maring",
@@ -39,25 +25,71 @@ LANG_NAMES = {
     "eng_Latn": "English",
 }
 
-NLLB_LANG_MAP = {
-    "nng_Latn": "nng_Latn",
-    "nmf_Latn": "nmf_Latn",
-    "eng_Latn": "eng_Latn",
-}
 
-DIRECTIONS = {
-    "Maring -> English": ("nng_XX", "en_XX"),
-    "English -> Maring": ("en_XX", "nng_XX"),
-    "Tangkhul -> English": ("nmf_XX", "en_XX"),
-    "English -> Tangkhul": ("en_XX", "nmf_XX"),
-}
+# -------------------------------------------------------- GUI HELPERS
 
-CORPUS_FILES = {
-    "Maring -> English": ("data/nngLatn_engLatn.tsv", False),
-    "English -> Maring": ("data/nngLatn_engLatn.tsv", True),
-    "Tangkhul -> English": ("data/engLatn_nmfLatn.tsv", True),
-    "English -> Tangkhul": ("data/engLatn_nmfLatn.tsv", False),
-}
+
+def build_gui_catalog():
+    directions = build_direction_registry()
+    models_cfg, _, _, runtime_cfg = load_all_configs()
+    model_registry = models_cfg["models"]
+    gui_cfg = runtime_cfg["gui"]
+
+    model_names = {
+        "mbart50": "mBART-50",
+        "nllb200-dist": "NLLB-200",
+    }
+
+    model_choices = [(model_names[k], k) for k in model_registry.keys()]
+    direction_choices = [(item["label"], item["direction"]) for item in directions]
+
+    direction_map = {item["direction"]: item for item in directions}
+    label_to_direction = {item["label"]: item["direction"] for item in directions}
+    direction_to_label = {item["direction"]: item["label"] for item in directions}
+    model_label_to_key = {label: key for label, key in model_choices}
+    model_key_to_label = {key: label for label, key in model_choices}
+
+    return {
+        "gui_cfg": gui_cfg,
+        "direction_map": direction_map,
+        "label_to_direction": label_to_direction,
+        "direction_to_label": direction_to_label,
+        "model_choices": model_choices,
+        "model_label_to_key": model_label_to_key,
+        "model_key_to_label": model_key_to_label,
+    }
+
+
+def load_corpus_samples(corpus_file: str, reverse: bool, limit: int = 12):
+    items = []
+    if os.path.exists(corpus_file):
+        with open(corpus_file, "r", encoding="utf-8") as f:
+            reader = csv.reader(f, delimiter="\t")
+            first_row = next(reader, None)
+            if first_row and len(first_row) >= 2:
+                try:
+                    int(first_row[0])
+                    rows_iter = [first_row] + list(reader)
+                except Exception:
+                    rows_iter = reader
+            else:
+                rows_iter = reader
+
+            for row in rows_iter:
+                if len(row) < 2:
+                    continue
+                src, tgt = row[0].strip(), row[1].strip()
+                if not src or not tgt:
+                    continue
+                if reverse:
+                    src, tgt = tgt, src
+                items.append((src, tgt))
+                if len(items) >= limit:
+                    break
+    return items
+
+
+# -------------------------------------------------------- GUI APP
 
 
 class TranslatorApp:
@@ -68,64 +100,55 @@ class TranslatorApp:
         self.root.minsize(860, 580)
         self.root.configure(bg="#f6f7fb")
 
+        self.catalog = build_gui_catalog()
+        self.gui_cfg = self.catalog["gui_cfg"]
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = None
         self.tokenizer = None
         self.current_model_dir = None
-        self.current_direction = tk.StringVar(value="Maring -> English")
-        self.current_model_name = tk.StringVar(value="mBART-50")
-        self.status_var = tk.StringVar(value=f"Ready on {self.device}")
-        self.loaded_model_var = tk.StringVar(value="Not loaded")
         self.is_loading = False
         self.is_translating = False
         self.samples = {}
+
+        first_direction_label = list(self.catalog["label_to_direction"].keys())[0]
+        first_model_label = self.catalog["model_choices"][0][0]
+
+        self.current_direction_label = tk.StringVar(value=first_direction_label)
+        self.current_model_label = tk.StringVar(value=first_model_label)
+        self.status_var = tk.StringVar(value=f"Ready on {self.device}")
+        self.loaded_model_var = tk.StringVar(value="Not loaded")
+        self.sample_var = tk.StringVar()
 
         self._build_ui()
         self.load_samples()
         self.refresh_samples_ui()
         self.load_model_async()
 
-    def make_exp_dir(self, model_folder_name: str, src_lang: str, tgt_lang: str) -> str:
-        return os.path.join(BASE_EXP_DIR, f"{model_folder_name}_{src_lang}_{tgt_lang}")
+    def _selected_direction_key(self):
+        return self.catalog["label_to_direction"][self.current_direction_label.get()]
 
-    def get_direction(self):
-        return DIRECTIONS[self.current_direction.get()]
+    def _selected_model_key(self):
+        return self.catalog["model_label_to_key"][self.current_model_label.get()]
 
-    def get_model_config(self):
-        return MODEL_CONFIGS[self.current_model_name.get()]
-
-    def _get_codes(self, src_lang, tgt_lang, model_type):
-        if model_type == "mbart":
-            return src_lang, tgt_lang
-        mbart_to_nllb = {
-            "nng_XX": "nng_Latn",
-            "nmf_XX": "nmf_Latn",
-            "en_XX": "eng_Latn",
+    def _current_pair_cfg(self):
+        direction_key = self._selected_direction_key()
+        model_key = self._selected_model_key()
+        direction_info = self.catalog["direction_map"][direction_key]
+        pair = direction_info["pairs"][model_key]
+        return {
+            "direction": direction_key,
+            "direction_label": direction_info["label"],
+            "corpus_file": direction_info["corpus_file"],
+            **pair,
         }
-        return mbart_to_nllb[src_lang], mbart_to_nllb[tgt_lang]
 
-    def _get_model_dir(self, cfg, src_lang, tgt_lang):
-        src_code, tgt_code = self._get_codes(src_lang, tgt_lang, cfg["type"])
-        return (
-            self.make_exp_dir(cfg["folder_name"], src_code, tgt_code),
-            src_code,
-            tgt_code,
+    def _exp_dir_for_pair(self, pair_cfg):
+        return prepare_default_exp_dir(
+            os.path.abspath("exp"),
+            pair_cfg["folder_prefix"],
+            pair_cfg["src_lang"],
+            pair_cfg["tgt_lang"],
         )
-
-    def _set_nllb_tokenizer(self, tokenizer, model, src_code, tgt_code):
-        for lang in [src_code, tgt_code]:
-            if lang not in tokenizer.get_vocab():
-                tokenizer.add_special_tokens(
-                    {"additional_special_tokens": [lang]},
-                    replace_additional_special_tokens=False,
-                )
-        try:
-            model.resize_token_embeddings(len(tokenizer))
-        except Exception:
-            pass
-        tokenizer.src_lang = src_code
-        tokenizer.tgt_lang = tgt_code
-        return self._get_nllb_token_id(tokenizer, tgt_code)
 
     def _build_ui(self):
         style = ttk.Style()
@@ -198,7 +221,7 @@ class TranslatorApp:
         ).pack(anchor="w")
         ttk.Label(
             title_row,
-            text="Compact laptop-friendly layout • mBART-50 + NLLB-200",
+            text="YAML-driven local-model toolkit • mBART-50 + NLLB-200",
             style="Subtle.TLabel",
         ).pack(anchor="w", pady=(1, 0))
 
@@ -214,8 +237,8 @@ class TranslatorApp:
         )
         self.model_box = ttk.Combobox(
             controls_card,
-            textvariable=self.current_model_name,
-            values=list(MODEL_CONFIGS.keys()),
+            textvariable=self.current_model_label,
+            values=[label for label, _ in self.catalog["model_choices"]],
             state="readonly",
             width=16,
         )
@@ -229,8 +252,8 @@ class TranslatorApp:
         )
         self.direction_box = ttk.Combobox(
             controls_card,
-            textvariable=self.current_direction,
-            values=list(DIRECTIONS.keys()),
+            textvariable=self.current_direction_label,
+            values=list(self.catalog["label_to_direction"].keys()),
             state="readonly",
             width=24,
         )
@@ -290,7 +313,6 @@ class TranslatorApp:
         ttk.Label(samples_card, text="Corpus Sample", style="Header.TLabel").grid(
             row=0, column=0, sticky="w"
         )
-        self.sample_var = tk.StringVar()
         self.sample_box = ttk.Combobox(
             samples_card,
             textvariable=self.sample_var,
@@ -362,37 +384,19 @@ class TranslatorApp:
 
     def load_samples(self):
         self.samples = {}
-        for direction, (path, reverse) in CORPUS_FILES.items():
-            items = []
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    reader = csv.reader(f, delimiter="\t")
-                    first_row = next(reader, None)
-                    if first_row and len(first_row) >= 2:
-                        try:
-                            int(first_row[0])
-                            rows_iter = [first_row] + list(reader)
-                        except Exception:
-                            rows_iter = reader
-                    else:
-                        rows_iter = reader
-
-                    for row in rows_iter:
-                        if len(row) < 2:
-                            continue
-                        src, tgt = row[0].strip(), row[1].strip()
-                        if not src or not tgt:
-                            continue
-                        if reverse:
-                            src, tgt = tgt, src
-                        items.append((src, tgt))
-                        if len(items) >= 12:
-                            break
-            self.samples[direction] = items
+        for direction_key, direction_info in self.catalog["direction_map"].items():
+            # prefer mbart50 pair for sample reversal, or fall back
+            pair = direction_info["pairs"].get("mbart50") or next(
+                iter(direction_info["pairs"].values())
+            )
+            self.samples[direction_key] = load_corpus_samples(
+                direction_info["corpus_file"],
+                pair.get("reverse", False),
+            )
 
     def refresh_samples_ui(self):
-        direction = self.current_direction.get()
-        items = self.samples.get(direction, [])
+        direction_key = self._selected_direction_key()
+        items = self.samples.get(direction_key, [])
         formatted = [f"{i+1}. {src}" for i, (src, _) in enumerate(items)]
         self.sample_box["values"] = formatted
         self.sample_var.set(formatted[0] if formatted else "")
@@ -402,8 +406,8 @@ class TranslatorApp:
         self.load_model_async()
 
     def load_selected_sample(self):
-        direction = self.current_direction.get()
-        items = self.samples.get(direction, [])
+        direction_key = self._selected_direction_key()
+        items = self.samples.get(direction_key, [])
         current = self.sample_box.current()
         if current is None or current < 0 or current >= len(items):
             return
@@ -412,10 +416,10 @@ class TranslatorApp:
         self.input_text.insert("1.0", src)
 
     def swap_direction(self):
-        order = list(DIRECTIONS.keys())
-        cur = self.current_direction.get()
-        idx = order.index(cur)
-        self.current_direction.set(order[(idx + 1) % len(order)])
+        labels = list(self.catalog["label_to_direction"].keys())
+        cur = self.current_direction_label.get()
+        idx = labels.index(cur)
+        self.current_direction_label.set(labels[(idx + 1) % len(labels)])
         self.on_model_or_direction_changed()
 
     def clear_text(self):
@@ -456,13 +460,15 @@ class TranslatorApp:
         return token_id
 
     def load_model(self):
-        src_lang, tgt_lang = self.get_direction()
-        cfg = self.get_model_config()
-        model_dir, src_code, tgt_code = self._get_model_dir(cfg, src_lang, tgt_lang)
+        pair_cfg = self._current_pair_cfg()
+        model_dir = self._exp_dir_for_pair(pair_cfg)
+        model_family = pair_cfg["model_family"]
+        src_lang = pair_cfg["src_lang"]
+        tgt_lang = pair_cfg["tgt_lang"]
 
         self.root.after(
             0,
-            lambda path=model_dir, name=self.current_model_name.get(): self.status_var.set(
+            lambda path=model_dir, name=self.current_model_label.get(): self.status_var.set(
                 f"Loading {name} from {path} ..."
             ),
         )
@@ -477,41 +483,35 @@ class TranslatorApp:
             return
 
         try:
-            if cfg["type"] == "mbart":
+            if model_family == "mbart50":
                 tokenizer = MBart50TokenizerFast.from_pretrained(
                     model_dir,
                     src_lang="en_XX",
                     tgt_lang="en_XX",
+                    local_files_only=True,
                 )
-                model = MBartForConditionalGeneration.from_pretrained(model_dir)
+                model = MBartForConditionalGeneration.from_pretrained(
+                    model_dir,
+                    local_files_only=True,
+                )
                 self._register_custom_langs_mbart(tokenizer, [src_lang, tgt_lang])
                 tokenizer.src_lang = src_lang
                 tokenizer.tgt_lang = tgt_lang
                 model.config.forced_bos_token_id = tokenizer.lang_code_to_id[tgt_lang]
             else:
-                try:
-                    tokenizer = AutoTokenizer.from_pretrained(
-                        model_dir,
-                        fix_mistral_regex=True,
-                    )
-                except TypeError:
-                    tokenizer = AutoTokenizer.from_pretrained(model_dir)
-
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_dir)
-                for lang in [src_code, tgt_code]:
-                    if lang not in tokenizer.get_vocab():
-                        tokenizer.add_special_tokens(
-                            {"additional_special_tokens": [lang]},
-                            replace_additional_special_tokens=False,
-                        )
-                try:
-                    model.resize_token_embeddings(len(tokenizer))
-                except Exception:
-                    pass
-                tokenizer.src_lang = src_code
-                tokenizer.tgt_lang = tgt_code
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_dir,
+                    local_files_only=True,
+                )
+                model = AutoModelForSeq2SeqLM.from_pretrained(
+                    model_dir,
+                    local_files_only=True,
+                )
+                tokenizer.src_lang = src_lang
+                tokenizer.tgt_lang = tgt_lang
                 model.config.forced_bos_token_id = self._get_nllb_token_id(
-                    tokenizer, tgt_code
+                    tokenizer,
+                    tgt_lang,
                 )
 
             model.to(self.device)
@@ -522,10 +522,10 @@ class TranslatorApp:
             self.current_model_dir = model_dir
 
             loaded_text = (
-                f"{self.current_model_name.get()} • {os.path.basename(model_dir)}"
+                f"{self.current_model_label.get()} • {os.path.basename(model_dir)}"
             )
             status_text = (
-                f"Loaded {self.current_model_name.get()} | "
+                f"Loaded {self.current_model_label.get()} | "
                 f"{LANG_NAMES[src_lang]} -> {LANG_NAMES[tgt_lang]} | Device: {self.device}"
             )
             self.root.after(0, lambda text=loaded_text: self.loaded_model_var.set(text))
@@ -567,46 +567,42 @@ class TranslatorApp:
                 )
                 return
 
-            src_lang, tgt_lang = self.get_direction()
-            cfg = self.get_model_config()
+            pair_cfg = self._current_pair_cfg()
+            src_lang = pair_cfg["src_lang"]
+            tgt_lang = pair_cfg["tgt_lang"]
+            model_family = pair_cfg["model_family"]
+
             self.root.after(
                 0,
                 lambda: self.status_var.set(
-                    f"Translating with {self.current_model_name.get()}..."
+                    f"Translating with {self.current_model_label.get()}..."
                 ),
             )
 
-            if cfg["type"] == "mbart":
+            if model_family == "mbart50":
                 self._register_custom_langs_mbart(self.tokenizer, [src_lang, tgt_lang])
                 self.tokenizer.src_lang = src_lang
                 self.tokenizer.tgt_lang = tgt_lang
                 forced_bos = self.tokenizer.lang_code_to_id[tgt_lang]
-                inputs = self.tokenizer(
-                    text,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=MAX_LENGTH,
-                )
             else:
-                src_code, tgt_code = self._get_codes(src_lang, tgt_lang, cfg["type"])
-                self.tokenizer.src_lang = src_code
-                self.tokenizer.tgt_lang = tgt_code
-                forced_bos = self._get_nllb_token_id(self.tokenizer, tgt_code)
-                inputs = self.tokenizer(
-                    text,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=MAX_LENGTH,
-                )
+                self.tokenizer.src_lang = src_lang
+                self.tokenizer.tgt_lang = tgt_lang
+                forced_bos = self._get_nllb_token_id(self.tokenizer, tgt_lang)
 
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=self.gui_cfg["max_length"],
+            )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             with torch.inference_mode():
                 generated = self.model.generate(
                     **inputs,
                     forced_bos_token_id=forced_bos,
-                    max_length=MAX_LENGTH,
-                    num_beams=NUM_BEAMS,
+                    max_length=self.gui_cfg["max_length"],
+                    num_beams=self.gui_cfg["num_beams"],
                     early_stopping=True,
                 )
 
@@ -617,7 +613,8 @@ class TranslatorApp:
             self.root.after(
                 0,
                 lambda: self.status_var.set(
-                    f"Done | {self.current_model_name.get()} | {LANG_NAMES[src_lang]} -> {LANG_NAMES[tgt_lang]} | Device: {self.device}"
+                    f"Done | {self.current_model_label.get()} | "
+                    f"{LANG_NAMES[src_lang]} -> {LANG_NAMES[tgt_lang]} | Device: {self.device}"
                 ),
             )
         except Exception as e:
@@ -630,7 +627,7 @@ class TranslatorApp:
             self.is_translating = False
 
 
-if __name__ == "__main__":
+def launch_gui():
     root = tk.Tk()
     app = TranslatorApp(root)
     root.mainloop()

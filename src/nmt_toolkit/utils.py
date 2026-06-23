@@ -1,9 +1,9 @@
 import os
-
 import pandas as pd
 
-
 # -------------------------------------------------------- FILE CHECKS
+
+
 def model_exists(exp_dir: str) -> bool:
     config_path = os.path.join(exp_dir, "config.json")
     tokenizer_path = os.path.join(exp_dir, "tokenizer.json")
@@ -23,24 +23,31 @@ def predictions_exist(exp_dir: str) -> bool:
 
 
 def evaluation_exists(exp_dir: str) -> bool:
-    path = os.path.join(exp_dir, "evaluation_results.csv")
+    path = os.path.join(exp_dir, "scores", "evaluation_results.csv")
     return os.path.exists(path) and os.path.getsize(path) > 0
 
 
-# -------------------------------------------------------- COMMONS
+# -------------------------------------------------------- EXPERIMENT PATHS
+
+
 def prepare_default_exp_dir(
-    model_folder_name: str, src_lang: str, tgt_lang: str
+    base_exp_dir: str, model_folder_name: str, src_lang: str, tgt_lang: str
 ) -> str:
-    """Create output directory: exp/{model_name}_{src_lang}_{tgt_lang}"""
-    dir_name = f"exp/{model_folder_name}_{src_lang}_{tgt_lang}"
+    dir_name = os.path.join(base_exp_dir, f"{model_folder_name}_{src_lang}_{tgt_lang}")
     os.makedirs(dir_name, exist_ok=True)
     return dir_name
 
 
+# -------------------------------------------------------- DATA LOADING
+
+
 def load_and_prepare_df(tsv_file: str, reverse: bool = False):
-    """Load TSV and optionally reverse source/target columns."""
     df = pd.read_csv(
-        tsv_file, sep="\t", header=None, names=["source", "target"], quoting=3
+        tsv_file,
+        sep="\t",
+        header=None,
+        names=["source", "target"],
+        quoting=3,
     )
     df = df[["source", "target"]].dropna()
     df["source"] = df["source"].astype(str).str.strip()

@@ -21,15 +21,21 @@ secret.py
 .env
 .env.*
 
-# Data, experiments and temporary files
+# Data, models, experiments and temporary files
 data/
+exp/
 exp*
+models/
 
 # Temporary files, old files and copies
 tmp/
 old/
 old*
 *copy.*
+
+# Incomplete files
+export_eval_metrics.py
+list_experiments.py
 
 # Optional model/download caches
 .cache/
