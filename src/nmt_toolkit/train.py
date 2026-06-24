@@ -153,8 +153,6 @@ def train_direction(cfg: dict):
     train_df = load_and_prepare_df(str(train_path), reverse=reverse)
     val_df = load_and_prepare_df(str(val_path), reverse=reverse)
 
-    print(val_df.head(3))
-
     # Keep copies under exp_dir (for translation script)
     train_out = os.path.join(output_dir, "train.csv")
     val_out = os.path.join(output_dir, "validation.csv")

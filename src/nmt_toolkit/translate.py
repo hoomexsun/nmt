@@ -63,7 +63,7 @@ def load_test_df(cfg: dict):
     Load test split from precomputed data directory, apply reverse at direction level.
     We reuse load_and_prepare_df and cfg['csv_file'].
     """
-    base_csv = Path(cfg["csv_file"])
+    base_csv = Path(cfg["corpus_file"])
     split_dir = base_csv.with_suffix("")  # e.g. data/engLatn_nngLatn
     test_path = split_dir / "test.csv"
 

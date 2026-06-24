@@ -8,10 +8,10 @@ A modular, production-ready NMT system supporting **2 multilingual models** for 
 
 - **2-model support**: mBART-50, NLLB-200 (distilled)
 - **YAML-driven registry**:
-  - `conf/models.yaml` – model registry (per-model overrides like batch size)
-  - `conf/directions.yaml` – language directions and corpora
-  - `conf/jobs.yaml` – model × direction jobs
-  - `conf/runtime.yaml` – global runtime, training, inference, GUI settings
+  - `conf/models.yaml` - model registry (per-model overrides like batch size)
+  - `conf/directions.yaml` - language directions and corpora
+  - `conf/jobs.yaml` - model × direction jobs
+  - `conf/runtime.yaml` - global runtime, training, inference, GUI settings
 - **Direction support**: Maring ↔ English, Tangkhul ↔ English (4 directions total)
 - **Pre-split corpora**:
   - Fixed test sizes per corpus (Maring: 1000; Tangkhul: 800),
@@ -77,8 +77,8 @@ A modular, production-ready NMT system supporting **2 multilingual models** for 
 ### Data layout
 
 - Original parallel corpora:
-  - `data/engLatn_nngLatn.tsv` (English–Maring)
-  - `data/engLatn_nmfLatn.tsv` (English–Tangkhul)
+  - `data/engLatn_nngLatn.tsv` (English-Maring)
+  - `data/engLatn_nmfLatn.tsv` (English-Tangkhul)
 - Pre-split files (created by `split_corpus.py`):
   - `data/engLatn_nngLatn/train.tsv`
   - `data/engLatn_nngLatn/validation.tsv`
